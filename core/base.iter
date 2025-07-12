@@ -58,10 +58,21 @@ __-- a ::
 `addi a0, a0, -1`
 ..
 
+__normbool ::
+`addi a0, a0, -1`
+`xori a0, a0, -1`
+..
+
 __< a b ::
 =   a
     b
 `slt a0, $a$, a0`
-`addi a0, a0, -1`
-`xori a0, a0, -1`
+    normbool
+..
+
+__> a b ::
+=   a
+    b
+`slt a0, a0, $a$`
+    normbool
 ..
