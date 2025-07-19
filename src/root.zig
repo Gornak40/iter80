@@ -96,12 +96,15 @@ test "tokenizer" {
 }
 
 pub const ParseError = std.mem.Allocator.Error || error{
-    EOF,
-    UnexpectedType,
-    EmptyMeta,
+    DuplicateArg,
     DuplicateSunc,
-    UnknownSunc,
+    EOF,
+    EmptyMeta,
     ExpectedExpr,
+    UnexpectedType,
+    UnknownArg,
+    UnknownSunc,
+    UnknownTag,
 };
 
 const TokenReader = struct {
@@ -147,10 +150,14 @@ test "build AST" {
 
 const ASTContext = struct {
     suncs: std.StringArrayHashMap(*const NodeSuncDecl),
+    tags: std.StringArrayHashMap(void),
+    args: std.StringArrayHashMap(void),
 
     fn init(alloc: std.mem.Allocator) ASTContext {
         return .{
             .suncs = std.StringArrayHashMap(*const NodeSuncDecl).init(alloc),
+            .tags = std.StringArrayHashMap(void).init(alloc),
+            .args = std.StringArrayHashMap(void).init(alloc),
         };
     }
 };
@@ -182,13 +189,15 @@ const NodeSuncDecl = struct {
         if (ctx.suncs.get(name)) |_| {} else return ParseError.DuplicateSunc;
 
         var args = std.ArrayList(*const NodeArgDecl).init(alloc);
+        ctx.args.clearRetainingCapacity();
         while (try r.peekType() != .@"::") {
-            const stmt = try NodeArgDecl.init(alloc, r);
-            try args.append(stmt);
+            const arg = try NodeArgDecl.init(alloc, r, ctx);
+            try args.append(arg);
         }
         _ = try r.readExpected(.@"::");
 
         var body = std.ArrayList(*const NodeStmt).init(alloc);
+        ctx.tags.clearRetainingCapacity();
         while (try r.peekType() != .@"..") {
             const stmt = try NodeStmt.init(alloc, r, ctx);
             try body.append(stmt);
@@ -204,11 +213,13 @@ const NodeSuncDecl = struct {
 const NodeArgDecl = struct {
     name: []const u8,
 
-    fn init(alloc: std.mem.Allocator, r: *TokenReader) !*const NodeArgDecl {
+    fn init(alloc: std.mem.Allocator, r: *TokenReader, ctx: *ASTContext) !*const NodeArgDecl {
         const node = try alloc.create(@This());
         const name = try r.readMetaExpected(.atom);
 
         node.* = .{ .name = name };
+        const entry = try ctx.args.getOrPutValue(node.name, {});
+        if (entry.found_existing) return ParseError.DuplicateArg;
         return node;
     }
 };
@@ -216,10 +227,10 @@ const NodeArgDecl = struct {
 const NodeArgPlace = struct {
     name: []const u8,
 
-    // TODO: check if arg exists.
-    fn init(alloc: std.mem.Allocator, r: *TokenReader) !*const NodeArgPlace {
+    fn init(alloc: std.mem.Allocator, r: *TokenReader, ctx: *const ASTContext) !*const NodeArgPlace {
         const node = try alloc.create(@This());
         const name = try r.readMetaExpected(.atom);
+        if (!ctx.args.contains(name)) return ParseError.UnknownArg;
 
         node.* = .{ .name = name };
         return node;
@@ -229,10 +240,10 @@ const NodeArgPlace = struct {
 const NodeTagPlace = struct {
     name: []const u8,
 
-    // TODO: check if tag exists.
-    fn init(alloc: std.mem.Allocator, r: *TokenReader) !*const NodeTagPlace {
+    fn init(alloc: std.mem.Allocator, r: *TokenReader, ctx: *const ASTContext) !*const NodeTagPlace {
         const node = try alloc.create(@This());
         const name = try r.readMetaExpected(.@"=a");
+        if (!ctx.tags.contains(name)) return ParseError.UnknownTag;
 
         node.* = .{ .name = name };
         return node;
@@ -262,11 +273,12 @@ const NodeSuncPlace = struct {
 const NodeTagDecl = struct {
     name: []const u8,
 
-    fn init(alloc: std.mem.Allocator, r: *TokenReader) !*const NodeTagDecl {
+    fn init(alloc: std.mem.Allocator, r: *TokenReader, ctx: *ASTContext) !*const NodeTagDecl {
         const node = try alloc.create(@This());
         const name = try r.readMetaExpected(.@"a=");
 
         node.* = .{ .name = name };
+        _ = try ctx.tags.getOrPutValue(node.name, {});
         return node;
     }
 };
@@ -278,7 +290,7 @@ const NodeStmt = struct {
 
     fn init(alloc: std.mem.Allocator, r: *TokenReader, ctx: *const ASTContext) ParseError!*const NodeStmt {
         const node = try alloc.create(@This());
-        const tag = NodeTagDecl.init(alloc, r) catch null;
+        const tag = NodeTagDecl.init(alloc, r, @constCast(ctx)) catch null;
 
         const expr = try INodeExpr.init(alloc, r, ctx);
 
@@ -308,9 +320,9 @@ const INodeExpr = union(enum) {
     literal: *const NodeLiteral,
 
     fn init(alloc: std.mem.Allocator, r: *TokenReader, ctx: *const ASTContext) !INodeExpr {
-        return if (NodeTagPlace.init(alloc, r)) |tag|
+        return if (NodeTagPlace.init(alloc, r, ctx)) |tag|
             .{ .tag_place = tag }
-        else |_| if (NodeArgPlace.init(alloc, r)) |arg|
+        else |_| if (NodeArgPlace.init(alloc, r, ctx)) |arg|
             .{ .arg_place = arg }
         else |_| if (NodeSuncPlace.init(alloc, r, ctx)) |sunc|
             .{ .sunc_place = sunc }
