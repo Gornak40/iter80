@@ -1,0 +1,11 @@
+__accumulate A n ::
+A=  A
+n=  n
+i=  null
+sum= null
+    iter < =i =n
+        sum=  :
+            + =sum [] =A =i
+            i= ++ i
+    =sum
+..

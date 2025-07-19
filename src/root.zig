@@ -94,3 +94,55 @@ test "tokenizer" {
         .{ .type = .@".." },
     }, tokens);
 }
+
+const NodeRoot = struct {
+    suncs: []*const NodeSuncDecl,
+};
+
+const NodeSuncDecl = struct {
+    name: []const u8,
+    args: []*const NodeArgDecl,
+    body: []INodeStmt,
+};
+
+const NodeArgDecl = struct {
+    name: []const u8,
+};
+
+const NodeArgPlace = struct {
+    name: []const u8,
+};
+
+const NodeTagPlace = struct {
+    name: []const u8,
+};
+
+const NodeSuncPlace = struct {
+    name: []const u8,
+    args: []INodeExpr,
+};
+
+const NodeTagDecl = struct {
+    name: []const u8,
+};
+
+const NodeTaggedExpr = struct {
+    tag: *const NodeTagDecl,
+    expr: INodeExpr,
+};
+
+const INodeStmt = union(enum) {
+    expr: INodeExpr,
+    tagged_expr: NodeTaggedExpr,
+    assembly: *const NodeAssembly,
+};
+
+const INodeExpr = union(enum) {
+    arg_place: *const NodeArgPlace,
+    tag_place: *const NodeTagPlace,
+    sunc_place: *const NodeSuncPlace,
+};
+
+const NodeAssembly = struct {
+    // TODO
+};
