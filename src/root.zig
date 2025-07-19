@@ -204,20 +204,57 @@ const NodeArgPlace = struct {
 
 const NodeTagPlace = struct {
     name: []const u8,
+
+    fn init(alloc: std.mem.Allocator, r: *TokenReader) !*const NodeTagPlace {
+        const node = try alloc.create(@This());
+        const name = try r.readMetaExpected(.@"=a");
+
+        node.* = .{ .name = name };
+        return node;
+    }
 };
 
 const NodeSuncPlace = struct {
     name: []const u8,
     args: []INodeExpr,
+
+    fn init(alloc: std.mem.Allocator, r: *TokenReader) !*const NodeSuncPlace {
+        const node = try alloc.create(@This());
+        const name = try r.readMetaExpected(.atom);
+
+        var args = std.ArrayList(INodeExpr).init(alloc);
+        // TODO: read args
+
+        node.* = .{ .name = name, .args = try args.toOwnedSlice() };
+        return node;
+    }
 };
 
 const NodeTagDecl = struct {
     name: []const u8,
+
+    fn init(alloc: std.mem.Allocator, r: *TokenReader) !*const NodeTagDecl {
+        const node = try alloc.create(@This());
+        const name = try r.readMetaExpected(.@"a=");
+
+        node.* = .{ .name = name };
+        return node;
+    }
 };
 
 const NodeTaggedExpr = struct {
     tag: *const NodeTagDecl,
     expr: INodeExpr,
+
+    fn init(alloc: std.mem.Allocator, r: *TokenReader) !*const NodeTaggedExpr {
+        const node = try alloc.create(@This());
+        const tag = try NodeTagDecl.init(alloc, r);
+
+        const expr = try INodeExpr.init(alloc, r);
+
+        node.* = .{ .tag = tag, .expr = expr };
+        return node;
+    }
 };
 
 const NodeInlineExpr = struct {
