@@ -89,7 +89,7 @@ test "tokenizer" {
         .{ .type = .@"a=", .meta = "a" },
         .{ .type = .atom, .meta = "a" },
         .{ .type = .atom, .meta = "b" },
-        .{ .type = .assembly, .meta = "add a0, =a, a0" },
+        .{ .type = .@"inline", .meta = "add a0, =a, a0" },
         .{ .type = .@"=a", .meta = "a" },
         .{ .type = .@".." },
     }, tokens);
