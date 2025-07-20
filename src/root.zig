@@ -186,7 +186,7 @@ const NodeSuncDecl = struct {
     fn init(alloc: std.mem.Allocator, r: *TokenReader, ctx: *ASTContext) !*const NodeSuncDecl {
         const node = try alloc.create(@This());
         const name = try r.readMetaExpected(.__a);
-        if (ctx.suncs.get(name)) |_| {} else return ParseError.DuplicateSunc;
+        if (ctx.suncs.contains(name)) return ParseError.DuplicateSunc;
 
         var args = std.ArrayList(*const NodeArgDecl).init(alloc);
         ctx.args.clearRetainingCapacity();
@@ -294,7 +294,7 @@ const NodeStmt = struct {
 
         const expr = try INodeExpr.init(alloc, r, ctx);
 
-        const @"inline" = NodeInline.init(alloc, r) catch null;
+        const @"inline" = NodeInline.init(alloc, r, ctx) catch null;
 
         node.* = .{ .tag = tag, .expr = expr, .@"inline" = @"inline" };
         return node;
@@ -338,29 +338,78 @@ const NodeInline = struct {
     opts: []INodeTmplOpt,
     next_inline: ?*const NodeInline,
 
-    fn init(alloc: std.mem.Allocator, r: *TokenReader) !*const NodeInline {
+    fn init(alloc: std.mem.Allocator, r: *TokenReader, ctx: *const ASTContext) !*const NodeInline {
         const node = try alloc.create(@This());
         const tmpl = try r.readMetaExpected(.@"inline");
 
         var opts = std.ArrayList(INodeTmplOpt).init(alloc);
-        // TODO: parse template, extract uids and tags.
+        var iter_uid = Extractor.init(tmpl, '~');
+        while (iter_uid.next()) |raw| {
+            const uid = try NodeTmplUId.init(alloc, raw);
+            try opts.append(INodeTmplOpt.init(uid));
+        }
+        var iter_tag = Extractor.init(tmpl, '$');
+        while (iter_tag.next()) |raw| {
+            const tag = try NodeTmplTag.init(alloc, raw, ctx);
+            try opts.append(INodeTmplOpt.init(tag));
+        }
 
-        const next_inline = NodeInline.init(alloc, r) catch null;
+        const next_inline = NodeInline.init(alloc, r, ctx) catch null;
 
         node.* = .{ .tmpl = tmpl, .opts = try opts.toOwnedSlice(), .next_inline = next_inline };
         return node;
     }
+
+    const Extractor = struct {
+        iter: std.mem.SplitIterator(u8, .scalar),
+
+        fn init(buf: []const u8, delim: u8) Extractor {
+            return .{
+                .iter = std.mem.splitScalar(u8, buf, delim),
+            };
+        }
+
+        fn next(self: *Extractor) ?[]const u8 {
+            return if (self.iter.next()) |_|
+                if (self.iter.next()) |raw| raw else null
+            else
+                null;
+        }
+    };
 };
 
 const NodeTmplUId = struct {
     name: []const u8,
+
+    fn init(alloc: std.mem.Allocator, raw: []const u8) !*const NodeTmplUId {
+        const node = try alloc.create(@This());
+
+        node.* = .{ .name = raw };
+        return node;
+    }
 };
 
 const NodeTmplTag = struct {
     name: []const u8,
+
+    fn init(alloc: std.mem.Allocator, raw: []const u8, ctx: *const ASTContext) !*const NodeTmplTag {
+        const node = try alloc.create(@This());
+        if (!ctx.tags.contains(raw)) return ParseError.UnknownTag;
+
+        node.* = .{ .name = raw };
+        return node;
+    }
 };
 
 const INodeTmplOpt = union(enum) {
     tmpl_uid: *const NodeTmplUId,
     tmpl_tag: *const NodeTmplTag,
+
+    fn init(node: anytype) INodeTmplOpt {
+        return switch (@TypeOf(node)) {
+            *const NodeTmplUId => .{ .tmpl_uid = node },
+            *const NodeTmplTag => .{ .tmpl_tag = node },
+            else => @compileError("Unsupported struct type: " ++ @typeName(@TypeOf(node))),
+        };
+    }
 };
