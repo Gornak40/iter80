@@ -101,6 +101,7 @@ pub const ParseError = std.mem.Allocator.Error || error{
     EOF,
     EmptyMeta,
     ExpectedExpr,
+    ExpectedSuncDeclOrStmt,
     UnexpectedType,
     UnknownArg,
     UnknownSunc,
@@ -158,6 +159,9 @@ test "build AST" {
         \\ a=   + 13 + 8 -9
         \\  + 1 =a
         \\ ..
+        \\
+        \\ main
+        \\ 0
     ;
 
     const alloc = std.testing.allocator;
@@ -184,18 +188,32 @@ const ASTContext = struct {
 };
 
 const NodeRoot = struct {
-    suncs: []*const NodeSuncDecl,
+    tops: []INodeTop,
 
     fn init(alloc: std.mem.Allocator, r: *TokenReader, ctx: *ASTContext) !*const NodeRoot {
         const node = try alloc.create(@This());
-        var suncs = std.ArrayList(*const NodeSuncDecl).init(alloc);
+        var tops = std.ArrayList(INodeTop).init(alloc);
         while (!r.isEmpty()) {
-            const sunc = try NodeSuncDecl.init(alloc, r, ctx);
-            try suncs.append(sunc);
+            const top = try INodeTop.init(alloc, r, ctx);
+            try tops.append(top);
         }
 
-        node.* = .{ .suncs = try suncs.toOwnedSlice() };
+        node.* = .{ .tops = try tops.toOwnedSlice() };
         return node;
+    }
+};
+
+const INodeTop = union {
+    sunc_decl: *const NodeSuncDecl,
+    stmt: *const NodeStmt,
+
+    fn init(alloc: std.mem.Allocator, r: *TokenReader, ctx: *ASTContext) !INodeTop {
+        return if (NodeSuncDecl.init(alloc, r, ctx)) |sunc_decl|
+            .{ .sunc_decl = sunc_decl }
+        else |_| if (NodeStmt.init(alloc, r, ctx)) |stmt|
+            .{ .stmt = stmt }
+        else |_|
+            ParseError.ExpectedSuncDeclOrStmt;
     }
 };
 

@@ -4,7 +4,7 @@ n=  n
 i=  null
 sum= null
     iter < =i =n
-        sum=  :
+        sum=  ,
             + =sum [] =A =i
             i= ++ i
     =sum

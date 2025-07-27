@@ -3,7 +3,7 @@ __; a b ::
     b
 ..
 
-__: a b ::
+__, a b ::
 a=  a
     b
     =a
@@ -58,21 +58,19 @@ __-- a ::
 `addi a0, a0, -1`
 ..
 
-__normbool ::
-`addi a0, a0, -1`
-`xori a0, a0, -1`
-..
-
 __< a b ::
-=   a
+a=   a
     b
 `slt a0, $a$, a0`
-    normbool
 ..
 
 __> a b ::
-=   a
+a=   a
     b
 `slt a0, a0, $a$`
-    normbool
+..
+
+__[] a ::
+a=  a
+`ld a0, 0(=a)`
 ..
