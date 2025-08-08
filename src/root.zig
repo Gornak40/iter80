@@ -58,8 +58,31 @@ const RawTokenizer = struct {
     }
 };
 
+test "raw tokenizer" {
+    const s =
+        \\__foo a b ::
+        \\a=    a
+        \\      b
+        \\`add a0, =a, a0`
+        \\  =a
+        \\..
+    ;
+    const expected = [_][]const u8{
+        "__foo", "a",  "b", "::",
+        "a=",    "a",  "b", "`add a0, =a, a0`",
+        "=a",    "..",
+    };
+    var i: usize = 0;
+    var iter = RawTokenizer.init(s);
+    while (iter.next()) |raw| : (i += 1) {
+        try std.testing.expect(i < expected.len);
+        try std.testing.expectEqualStrings(expected[i], raw);
+    }
+    try std.testing.expectEqual(expected.len, i);
+}
+
 /// Lifetime of `s` must be not less than lifetime of function result.
-pub fn tokenizeFromSlice(alloc: std.mem.Allocator, s: []const u8) ![]Token {
+fn tokenizeFromSlice(alloc: std.mem.Allocator, s: []const u8) ![]Token {
     var list = std.ArrayList(Token).init(alloc);
     var iter = RawTokenizer.init(s);
     while (iter.next()) |raw| {
@@ -141,13 +164,22 @@ const TokenReader = struct {
     }
 };
 
-pub fn buildASTLeaky(alloc: std.mem.Allocator, tokens: []const Token) !*const NodeRoot {
-    var r: TokenReader = .{ .tokens = tokens };
-    var ctx = ASTContext.init(alloc);
-    return NodeRoot.init(alloc, &r, &ctx);
+pub fn compile(alloc: std.mem.Allocator, s: []const u8) ![]const u8 {
+    const tokens = try tokenizeFromSlice(alloc, s);
+    defer alloc.free(tokens);
+
+    var arena = std.heap.ArenaAllocator.init(alloc);
+    defer arena.deinit();
+
+    const root = try buildASTLeaky(arena.allocator(), tokens);
+
+    var w = ExecWriter.init(alloc);
+    try root.execute(arena.allocator(), &w);
+
+    return w.flush();
 }
 
-test "build AST" {
+test "compile full" {
     const prog =
         \\ __+ a b ::
         \\ a=   a
@@ -164,13 +196,32 @@ test "build AST" {
         \\ 0
     ;
 
-    const alloc = std.testing.allocator;
-    const tokens = try tokenizeFromSlice(alloc, prog);
-    defer alloc.free(tokens);
+    _ = try compile(std.testing.allocator, prog);
+}
 
-    var arena = std.heap.ArenaAllocator.init(alloc);
-    defer arena.deinit();
-    _ = try buildASTLeaky(arena.allocator(), tokens);
+const ExecWriter = struct {
+    source: std.ArrayList(u8),
+
+    fn init(alloc: std.mem.Allocator) ExecWriter {
+        return .{
+            .source = std.ArrayList(u8).init(alloc),
+        };
+    }
+
+    fn writeLine(self: *ExecWriter, code: []const u8) !void {
+        try self.source.appendSlice(code);
+        try self.source.append('\n');
+    }
+
+    fn flush(self: *ExecWriter) ![]const u8 {
+        return self.source.toOwnedSlice();
+    }
+};
+
+fn buildASTLeaky(alloc: std.mem.Allocator, tokens: []const Token) !*const NodeRoot {
+    var r: TokenReader = .{ .tokens = tokens };
+    var ctx = ASTContext.init(alloc);
+    return NodeRoot.init(alloc, &r, &ctx);
 }
 
 const ASTContext = struct {
@@ -200,6 +251,13 @@ const NodeRoot = struct {
 
         node.* = .{ .tops = try tops.toOwnedSlice() };
         return node;
+    }
+
+    fn execute(self: NodeRoot, alloc: std.mem.Allocator, w: *ExecWriter) !void {
+        // TODO: implement
+        _ = self;
+        _ = alloc;
+        _ = w;
     }
 };
 

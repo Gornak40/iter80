@@ -14,10 +14,10 @@ pub fn main() !void {
     var file = try std.fs.cwd().openFile(args[1], .{});
     defer file.close();
 
-    const source = try file.readToEndAlloc(alloc, std.math.maxInt(u32));
-    defer alloc.free(source);
+    const prog = try file.readToEndAlloc(alloc, std.math.maxInt(u32));
+    defer alloc.free(prog);
 
-    const tokens = try iter.tokenizeFromSlice(alloc, source);
-    defer alloc.free(tokens);
-    std.debug.print("{any}\n", .{tokens});
+    const source = try iter.compile(alloc, prog);
+    defer alloc.free(source);
+    std.debug.print("{s}", .{source});
 }
