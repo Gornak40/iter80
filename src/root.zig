@@ -179,7 +179,23 @@ pub fn compile(alloc: std.mem.Allocator, s: []const u8) ![]const u8 {
     return w.flush();
 }
 
-test "compile full" {
+test "compile inline suffix" {
+    const prog =
+        \\ __iter a b ::
+        \\ 0
+        \\ `~a~:`
+        \\  a
+        \\ `bz a0, ~e~`
+        \\  b
+        \\ `j ~a~`
+        \\ `~e~:`
+        \\ ..
+    ;
+
+    _ = try compile(std.testing.allocator, prog);
+}
+
+test "compile base" {
     const prog =
         \\ __+ a b ::
         \\ a=   a
