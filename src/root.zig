@@ -121,6 +121,7 @@ test "tokenizer" {
 pub const ParseError = std.mem.Allocator.Error || error{
     DuplicateArg,
     DuplicateSunc,
+    DuplicateGlobalSunc,
     EOF,
     EmptyMeta,
     ExpectedExpr,
@@ -133,12 +134,12 @@ pub const ParseError = std.mem.Allocator.Error || error{
 
 const TokenReader = struct {
     tokens: []const Token,
-    curIdx: usize = 0,
+    cur_idx: usize = 0,
 
     fn readExpected(self: *TokenReader, expected: Token.Type) !Token {
         const tok = try self.peek();
         if (tok.type != expected) return ParseError.UnexpectedType;
-        defer self.curIdx += 1;
+        defer self.cur_idx += 1;
         return tok;
     }
 
@@ -148,7 +149,7 @@ const TokenReader = struct {
     }
 
     fn peek(self: TokenReader) !Token {
-        return if (self.isEmpty()) ParseError.EOF else self.tokens[self.curIdx];
+        return if (self.isEmpty()) ParseError.EOF else self.tokens[self.cur_idx];
     }
 
     fn peekType(self: TokenReader) !Token.Type {
@@ -156,11 +157,28 @@ const TokenReader = struct {
     }
 
     fn isEmpty(self: TokenReader) bool {
-        return self.curIdx == self.tokens.len;
+        return self.cur_idx == self.tokens.len;
     }
 
     fn rollback(self: *TokenReader) void {
-        self.curIdx -= 1;
+        self.cur_idx -= 1;
+    }
+};
+
+const glob_sunc_name = "glob";
+
+const ExecContext = struct {
+    alloc: std.mem.Allocator,
+    sunc_name: []const u8 = glob_sunc_name,
+
+    fn init(alloc: std.mem.Allocator) ExecContext {
+        return .{
+            .alloc = alloc,
+        };
+    }
+
+    fn getUid(self: ExecContext, uid: []const u8) ![]const u8 {
+        return std.fmt.allocPrint(self.alloc, ".L{s}__{s}", .{ self.sunc_name, uid });
     }
 };
 
@@ -173,10 +191,10 @@ pub fn compile(alloc: std.mem.Allocator, s: []const u8) ![]const u8 {
 
     const root = try buildASTLeaky(arena.allocator(), tokens);
 
-    var w = ExecWriter.init(alloc);
-    try root.execute(arena.allocator(), &w);
+    var ctx = ExecContext.init(arena.allocator());
+    const source = try root.execute(arena.allocator(), &ctx);
 
-    return w.flush();
+    return alloc.dupe(u8, source); // source will be destroyed with arena
 }
 
 test "compile inline suffix" {
@@ -192,7 +210,8 @@ test "compile inline suffix" {
         \\ ..
     ;
 
-    _ = try compile(std.testing.allocator, prog);
+    const s = try compile(std.testing.allocator, prog);
+    defer std.testing.allocator.free(s);
 }
 
 test "compile base" {
@@ -212,27 +231,9 @@ test "compile base" {
         \\ 0
     ;
 
-    _ = try compile(std.testing.allocator, prog);
+    const s = try compile(std.testing.allocator, prog);
+    defer std.testing.allocator.free(s);
 }
-
-const ExecWriter = struct {
-    source: std.ArrayList(u8),
-
-    fn init(alloc: std.mem.Allocator) ExecWriter {
-        return .{
-            .source = std.ArrayList(u8).init(alloc),
-        };
-    }
-
-    fn writeLine(self: *ExecWriter, code: []const u8) !void {
-        try self.source.appendSlice(code);
-        try self.source.append('\n');
-    }
-
-    fn flush(self: *ExecWriter) ![]const u8 {
-        return self.source.toOwnedSlice();
-    }
-};
 
 fn buildASTLeaky(alloc: std.mem.Allocator, tokens: []const Token) !*const NodeRoot {
     var r: TokenReader = .{ .tokens = tokens };
@@ -269,11 +270,11 @@ const NodeRoot = struct {
         return node;
     }
 
-    fn execute(self: NodeRoot, alloc: std.mem.Allocator, w: *ExecWriter) !void {
+    fn execute(self: NodeRoot, alloc: std.mem.Allocator, ctx: *ExecContext) ![]const u8 {
         // TODO: implement
         _ = self;
-        _ = alloc;
-        _ = w;
+        _ = ctx;
+        return std.fmt.allocPrint(alloc, "TODO: implement\n", .{});
     }
 };
 
@@ -301,6 +302,7 @@ const NodeSuncDecl = struct {
         const name = try r.readMetaExpected(.__a);
         errdefer r.rollback();
         if (ctx.suncs.contains(name)) return ParseError.DuplicateSunc;
+        if (std.mem.eql(u8, name, glob_sunc_name)) return ParseError.DuplicateGlobalSunc;
 
         var args = std.ArrayList(*const NodeArgDecl).init(alloc);
         ctx.args.clearRetainingCapacity();
@@ -430,6 +432,10 @@ const NodeLiteral = struct {
 
         node.* = .{ .value = try std.fmt.parseInt(i64, value, 0) };
         return node;
+    }
+
+    fn execute(self: NodeLiteral, alloc: std.mem.Allocator) ![]const u8 {
+        return std.fmt.allocPrint(alloc, "li a0, {}\n", .{self.value});
     }
 };
 
