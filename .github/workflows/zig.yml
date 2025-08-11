@@ -15,4 +15,4 @@ jobs:
           version: 0.13.0
       - run: zig build --summary all
       - run: zig build test
-      - run: zig build run -- core/base.iter > /dev/null
+      - run: zig build run -- core/base.iter >&2
