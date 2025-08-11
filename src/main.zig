@@ -21,6 +21,6 @@ pub fn main() !void {
     const source = try iter.compile(alloc, prog);
     defer alloc.free(source);
 
-    const ouf = std.io.getStdIn();
+    const ouf = std.io.getStdOut();
     try std.fmt.format(ouf.writer(), "{s}", .{source});
 }
