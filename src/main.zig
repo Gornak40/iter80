@@ -7,6 +7,7 @@ pub fn main() !void {
     const alloc = gpa.allocator();
 
     const args = try std.process.argsAlloc(alloc);
+    defer std.process.argsFree(alloc, args);
     if (args.len != 2) {
         return error.UsageError; // TODO: more verbose
     }
@@ -19,5 +20,7 @@ pub fn main() !void {
 
     const source = try iter.compile(alloc, prog);
     defer alloc.free(source);
-    std.debug.print("{s}", .{source});
+
+    const ouf = std.io.getStdIn();
+    try std.fmt.format(ouf.writer(), "{s}", .{source});
 }

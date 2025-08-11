@@ -33,7 +33,7 @@ __iter a b ::
 
 __? a b c ::
     a
-`bz ~c~`
+`bz a0, ~c~`
     b
 `j ~e~`
 `~c~:`
@@ -51,6 +51,29 @@ __- a b ::
 a=  a
     b
 `sub a0, $a$, a0`
+..
+
+__^ a b ::
+a=  a
+    b
+`xor a0, $a$, a0`
+..
+
+__& a b ::
+a=  a
+    b
+`and a0, $a$, a0`
+..
+
+__| a b ::
+a=  a
+    b
+`or a0, $a$, a0`
+..
+
+__~ a ::
+    a
+`xori a0, a0, -1`
 ..
 
 __++ a ::
