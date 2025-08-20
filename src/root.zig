@@ -460,8 +460,7 @@ const INodeExpr = union(enum) {
 };
 
 const NodeInline = struct {
-    tmpl: []const u8,
-    opts: []INodeTmplOpt,
+    parts: []INodeTmplPart,
     next_inline: ?*const NodeInline,
 
     fn init(alloc: std.mem.Allocator, r: *TokenReader, ctx: *const ASTContext) !*const NodeInline {
@@ -469,40 +468,41 @@ const NodeInline = struct {
         const tmpl = try r.readMetaExpected(.@"inline");
         errdefer r.rollback();
 
-        var opts = std.ArrayList(INodeTmplOpt).init(alloc);
-        var iter_uid = Extractor.init(tmpl, '~');
-        while (iter_uid.next()) |raw| {
-            const uid = try NodeTmplUId.init(alloc, raw);
-            try opts.append(INodeTmplOpt.init(uid));
-        }
-        var iter_tag = Extractor.init(tmpl, '$');
-        while (iter_tag.next()) |raw| {
-            const tag = try NodeTmplTag.init(alloc, raw, ctx);
-            try opts.append(INodeTmplOpt.init(tag));
+        var parts = std.ArrayList(INodeTmplPart).init(alloc);
+        var i: usize = 0;
+        while (i < tmpl.len) {
+            var part: INodeTmplPart = undefined;
+            if (std.mem.indexOfAnyPos(u8, tmpl, i + 1, "~$")) |j| {
+                part = if (tmpl[i] == tmpl[j]) switch (tmpl[i]) {
+                    '~' => INodeTmplPart{ .tmpl_uid = try NodeTmplUId.init(alloc, tmpl[i + 1 .. j]) },
+                    '$' => INodeTmplPart{ .tmpl_tag = try NodeTmplTag.init(alloc, tmpl[i + 1 .. j], ctx) },
+                    else => unreachable,
+                } else INodeTmplPart{ .tmpl_raw = try NodeTmplRaw.init(alloc, tmpl[i + 1 .. j]) };
+                i = j;
+            } else {
+                part = INodeTmplPart{ .tmpl_raw = try NodeTmplRaw.init(alloc, tmpl[i..]) };
+                i = tmpl.len;
+            }
+
+            try parts.append(part);
         }
 
         const next_inline = NodeInline.init(alloc, r, ctx) catch null;
 
-        node.* = .{ .tmpl = tmpl, .opts = try opts.toOwnedSlice(), .next_inline = next_inline };
+        node.* = .{ .parts = try parts.toOwnedSlice(), .next_inline = next_inline };
         return node;
     }
+};
 
-    const Extractor = struct {
-        iter: std.mem.SplitIterator(u8, .scalar),
+const NodeTmplRaw = struct {
+    raw: []const u8,
 
-        fn init(buf: []const u8, delim: u8) Extractor {
-            return .{
-                .iter = std.mem.splitScalar(u8, buf, delim),
-            };
-        }
+    fn init(alloc: std.mem.Allocator, raw: []const u8) !*const NodeTmplRaw {
+        const node = try alloc.create(@This());
 
-        fn next(self: *Extractor) ?[]const u8 {
-            return if (self.iter.next()) |_|
-                if (self.iter.next()) |raw| raw else null
-            else
-                null;
-        }
-    };
+        node.* = .{ .raw = raw };
+        return node;
+    }
 };
 
 const NodeTmplUId = struct {
@@ -528,12 +528,14 @@ const NodeTmplTag = struct {
     }
 };
 
-const INodeTmplOpt = union(enum) {
+const INodeTmplPart = union(enum) {
+    tmpl_raw: *const NodeTmplRaw,
     tmpl_uid: *const NodeTmplUId,
     tmpl_tag: *const NodeTmplTag,
 
-    fn init(node: anytype) INodeTmplOpt {
+    fn init(node: anytype) INodeTmplPart {
         return switch (@TypeOf(node)) {
+            *const NodeTmplRaw => .{ .tmpl_raw = node },
             *const NodeTmplUId => .{ .tmpl_uid = node },
             *const NodeTmplTag => .{ .tmpl_tag = node },
             else => @compileError("Unsupported struct type: " ++ @typeName(@TypeOf(node))),
