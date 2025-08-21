@@ -183,11 +183,10 @@ const ExecContext = struct {
 };
 
 pub fn compile(alloc: std.mem.Allocator, s: []const u8) ![]const u8 {
-    const tokens = try tokenizeFromSlice(alloc, s);
-    defer alloc.free(tokens);
-
     var arena = std.heap.ArenaAllocator.init(alloc);
     defer arena.deinit();
+
+    const tokens = try tokenizeFromSlice(arena.allocator(), s);
 
     const root = try buildASTLeaky(arena.allocator(), tokens);
 
@@ -542,3 +541,5 @@ const INodeTmplPart = union(enum) {
         };
     }
 };
+
+test "inline template parts" {}
