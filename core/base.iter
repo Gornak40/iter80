@@ -21,84 +21,68 @@ __true ::
     -1
 ..
 
+__none ::
+..
+
 __iter a b ::
-    null
-`~a~:`
-    a
-`bz a0, ~e~`
-    b
-`j ~a~`
-`~e~:`
+    none    `~a~:`
+    a   `bz a0, ~e~`
+    b   `j ~a~` `~e~:`
 ..
 
 __? a b c ::
-    a
-`bz a0, ~c~`
-    b
-`j ~e~`
-`~c~:`
-    c
-`~e~:`
+    a   `bz a0, ~c~`
+    b   `j ~e~` `~c~:`
+    c   `~e~:`
 ..
 
 __+ a b ::
 a=  a
-    b
-`add a0, $a$, a0`
+    b   `add a0, $a$, a0`
 ..
 
 __- a b ::
 a=  a
-    b
-`sub a0, $a$, a0`
+    b   `sub a0, $a$, a0`
 ..
 
 __^ a b ::
 a=  a
-    b
-`xor a0, $a$, a0`
+    b   `xor a0, $a$, a0`
 ..
 
 __& a b ::
 a=  a
-    b
-`and a0, $a$, a0`
+    b   `and a0, $a$, a0`
 ..
 
 __| a b ::
 a=  a
-    b
-`or a0, $a$, a0`
+    b   `or a0, $a$, a0`
 ..
 
 __~ a ::
-    a
-`xori a0, a0, -1`
+    a   `xori a0, a0, -1`
 ..
 
 __++ a ::
-    a
-`addi a0, a0, 1`
+    a   `addi a0, a0, 1`
 ..
 
 __-- a ::
-    a
-`addi a0, a0, -1`
+    a   `addi a0, a0, -1`
 ..
 
 __< a b ::
 a=   a
-    b
-`slt a0, $a$, a0`
+    b   `slt a0, $a$, a0`
 ..
 
 __> a b ::
 a=   a
-    b
-`slt a0, a0, $a$`
+    b   `slt a0, a0, $a$`
 ..
 
 __[] a ::
-a=  a
-`ld a0, 0(=a)`
+a=  a   `ld a0, 0(=a)`
 ..
