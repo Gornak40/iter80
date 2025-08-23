@@ -83,12 +83,12 @@ test "raw tokenizer" {
 
 /// Lifetime of `s` must be not less than lifetime of function result.
 fn tokenizeFromSlice(alloc: std.mem.Allocator, s: []const u8) ![]Token {
-    var list = std.ArrayList(Token).init(alloc);
+    var list: std.ArrayListUnmanaged(Token) = .empty;
     var iter = RawTokenizer.init(s);
     while (iter.next()) |raw| {
-        try list.append(Token.init(raw));
+        try list.append(alloc, Token.init(raw));
     }
-    return list.toOwnedSlice();
+    return list.toOwnedSlice(alloc);
 }
 
 test "tokenizer" {
@@ -170,15 +170,47 @@ const glob_sunc_name = "glob";
 const ExecContext = struct {
     alloc: std.mem.Allocator,
     sunc_name: []const u8 = glob_sunc_name,
+    tag_manager: TagManager,
 
     fn init(alloc: std.mem.Allocator) ExecContext {
         return .{
             .alloc = alloc,
+            .tag_manager = .init(),
         };
     }
 
     fn getUid(self: ExecContext, uid: []const u8) ![]const u8 {
         return std.fmt.allocPrint(self.alloc, ".L{s}__{s}", .{ self.sunc_name, uid });
+    }
+
+    fn addSunc(self: *ExecContext, node: *const NodeSuncDecl) !void {
+        _ = self;
+        _ = node;
+    }
+};
+
+const TagManager = struct {
+    used: std.EnumSet(Register),
+
+    fn init() TagManager {
+        return .{
+            .used = .initEmpty(),
+        };
+    }
+
+    const Register = enum { a1, a2, a3, a4, a5, a6, a7, s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11 };
+
+    fn lock(self: *TagManager) ?Register {
+        var r: ?Register = null;
+        inline for (std.meta.fields(Register)) |field| {
+            if (!self.used.contains(field.value))
+                r = field.value;
+        }
+        return r;
+    }
+
+    fn unlock(self: *TagManager, r: Register) void {
+        self.used.remove(r);
     }
 };
 
@@ -236,22 +268,14 @@ test "compile base" {
 
 fn buildASTLeaky(alloc: std.mem.Allocator, tokens: []const Token) !*const NodeRoot {
     var r: TokenReader = .{ .tokens = tokens };
-    var ctx = ASTContext.init(alloc);
+    var ctx: ASTContext = .{};
     return NodeRoot.init(alloc, &r, &ctx);
 }
 
 const ASTContext = struct {
-    suncs: std.StringArrayHashMap(*const NodeSuncDecl),
-    tags: std.StringArrayHashMap(void),
-    args: std.StringArrayHashMap(void),
-
-    fn init(alloc: std.mem.Allocator) ASTContext {
-        return .{
-            .suncs = std.StringArrayHashMap(*const NodeSuncDecl).init(alloc),
-            .tags = std.StringArrayHashMap(void).init(alloc),
-            .args = std.StringArrayHashMap(void).init(alloc),
-        };
-    }
+    suncs: std.StringArrayHashMapUnmanaged(*const NodeSuncDecl) = .empty,
+    tags: std.StringArrayHashMapUnmanaged(void) = .empty,
+    args: std.StringArrayHashMapUnmanaged(void) = .empty,
 };
 
 const NodeRoot = struct {
@@ -259,25 +283,28 @@ const NodeRoot = struct {
 
     fn init(alloc: std.mem.Allocator, r: *TokenReader, ctx: *ASTContext) !*const NodeRoot {
         const node = try alloc.create(@This());
-        var tops = std.ArrayList(INodeTop).init(alloc);
+        var tops: std.ArrayListUnmanaged(INodeTop) = .empty;
         while (!r.isEmpty()) {
             const top = try INodeTop.init(alloc, r, ctx);
-            try tops.append(top);
+            try tops.append(alloc, top);
         }
 
-        node.* = .{ .tops = try tops.toOwnedSlice() };
+        node.* = .{ .tops = try tops.toOwnedSlice(alloc) };
         return node;
     }
 
     fn execute(self: NodeRoot, alloc: std.mem.Allocator, ctx: *ExecContext) ![]const u8 {
-        // TODO: implement
-        _ = self;
-        _ = ctx;
+        for (self.tops) |top| {
+            switch (top) {
+                .sunc_decl => |sunc_decl| try ctx.addSunc(sunc_decl),
+                .stmt => |stmt| _ = try stmt.execute(alloc, ctx),
+            }
+        }
         return std.fmt.allocPrint(alloc, "TODO: implement\n", .{});
     }
 };
 
-const INodeTop = union {
+const INodeTop = union(enum) {
     sunc_decl: *const NodeSuncDecl,
     stmt: *const NodeStmt,
 
@@ -303,24 +330,24 @@ const NodeSuncDecl = struct {
         if (ctx.suncs.contains(name)) return ParseError.DuplicateSunc;
         if (std.mem.eql(u8, name, glob_sunc_name)) return ParseError.DuplicateGlobalSunc;
 
-        var args = std.ArrayList(*const NodeArgDecl).init(alloc);
+        var args: std.ArrayListUnmanaged(*const NodeArgDecl) = .empty;
         ctx.args.clearRetainingCapacity();
         while (try r.peekType() != .@"::") {
             const arg = try NodeArgDecl.init(alloc, r, ctx);
-            try args.append(arg);
+            try args.append(alloc, arg);
         }
         _ = try r.readExpected(.@"::");
 
-        var body = std.ArrayList(*const NodeStmt).init(alloc);
+        var body: std.ArrayListUnmanaged(*const NodeStmt) = .empty;
         ctx.tags.clearRetainingCapacity();
         while (try r.peekType() != .@"..") {
             const stmt = try NodeStmt.init(alloc, r, ctx);
-            try body.append(stmt);
+            try body.append(alloc, stmt);
         }
         _ = try r.readExpected(.@"..");
 
-        node.* = .{ .name = name, .args = try args.toOwnedSlice(), .body = try body.toOwnedSlice() };
-        try ctx.suncs.putNoClobber(node.name, node);
+        node.* = .{ .name = name, .args = try args.toOwnedSlice(alloc), .body = try body.toOwnedSlice(alloc) };
+        try ctx.suncs.putNoClobber(alloc, node.name, node);
         return node;
     }
 };
@@ -335,7 +362,7 @@ const NodeArgDecl = struct {
         if (ctx.args.contains(name)) return ParseError.DuplicateArg;
 
         node.* = .{ .name = name };
-        try ctx.args.putNoClobber(node.name, {});
+        try ctx.args.putNoClobber(alloc, node.name, {});
         return node;
     }
 };
@@ -378,13 +405,13 @@ const NodeSuncPlace = struct {
         errdefer r.rollback();
         const sunc = ctx.suncs.get(name) orelse return ParseError.UnknownSunc;
 
-        var args = std.ArrayList(*const NodeStmt).init(alloc);
+        var args: std.ArrayListUnmanaged(*const NodeStmt) = try .initCapacity(alloc, sunc.args.len);
         for (sunc.args) |_| {
             const stmt = try NodeStmt.init(alloc, r, ctx);
-            try args.append(stmt);
+            args.appendAssumeCapacity(stmt);
         }
 
-        node.* = .{ .name = name, .args = try args.toOwnedSlice() };
+        node.* = .{ .name = name, .args = try args.toOwnedSlice(alloc) };
         return node;
     }
 };
@@ -398,7 +425,7 @@ const NodeTagDecl = struct {
         errdefer r.rollback();
 
         node.* = .{ .name = name };
-        try ctx.tags.put(node.name, {});
+        try ctx.tags.put(alloc, node.name, {});
         return node;
     }
 };
@@ -418,6 +445,14 @@ const NodeStmt = struct {
 
         node.* = .{ .tag = tag, .expr = expr, .@"inline" = @"inline" };
         return node;
+    }
+
+    fn execute(self: NodeStmt, alloc: std.mem.Allocator, ctx: *ExecContext) ![]const u8 {
+        _ = self;
+        _ = alloc;
+        _ = ctx;
+        // TODO:
+        return "AMOGUS";
     }
 };
 
@@ -467,7 +502,7 @@ const NodeInline = struct {
         const tmpl = try r.readMetaExpected(.@"inline");
         errdefer r.rollback();
 
-        var parts = std.ArrayList(INodeTmplPart).init(alloc);
+        var parts: std.ArrayListUnmanaged(INodeTmplPart) = .empty;
         var i: usize = 0;
         while (i < tmpl.len) {
             var part: INodeTmplPart = undefined;
@@ -483,12 +518,12 @@ const NodeInline = struct {
                 i = tmpl.len;
             }
 
-            try parts.append(part);
+            try parts.append(alloc, part);
         }
 
         const next_inline = NodeInline.init(alloc, r, ctx) catch null;
 
-        node.* = .{ .parts = try parts.toOwnedSlice(), .next_inline = next_inline };
+        node.* = .{ .parts = try parts.toOwnedSlice(alloc), .next_inline = next_inline };
         return node;
     }
 };
