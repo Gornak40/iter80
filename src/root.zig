@@ -290,8 +290,7 @@ const NodeRoot = struct {
 
     fn execute(self: NodeRoot, alloc: std.mem.Allocator, ctx: *ExecContext) ![]const u8 {
         var source: std.ArrayListUnmanaged(u8) = .empty;
-        try source.appendSlice(alloc, self.label);
-        try source.append(alloc, '\n');
+        try std.fmt.format(source.writer(alloc), "global {s}\n{s}:\n", .{ self.label, self.label });
         for (self.tops) |top| {
             switch (top) {
                 .sunc_decl => |sunc_decl| try ctx.addSunc(alloc, sunc_decl),
@@ -501,46 +500,68 @@ const INodeExpr = union(enum) {
 };
 
 const NodeInline = struct {
-    parts: []INodeTmplPart,
+    parts: []Part,
     next_inline: ?*const NodeInline,
+
+    const Part = union(enum) {
+        raw: []const u8,
+        uid: []const u8,
+        tag: []const u8,
+    };
 
     fn init(alloc: std.mem.Allocator, r: *TokenReader, ctx: *const ASTContext) !*const NodeInline {
         const node = try alloc.create(@This());
         const tmpl = try r.readMetaExpected(.@"inline");
         errdefer r.rollback();
 
-        var parts: std.ArrayListUnmanaged(INodeTmplPart) = .empty;
+        const parts = try extractParts(alloc, tmpl);
+        for (parts) |part| {
+            switch (part) {
+                .tag => |tag| if (!ctx.tags.contains(tag)) return ParseError.UnknownTag,
+                else => {},
+            }
+        }
+        const next_inline = NodeInline.init(alloc, r, ctx) catch null;
+
+        node.* = .{ .parts = parts, .next_inline = next_inline };
+        return node;
+    }
+
+    fn extractParts(alloc: std.mem.Allocator, tmpl: []const u8) ![]Part {
+        var parts: std.ArrayListUnmanaged(Part) = .empty;
         var i: usize = 0;
         while (i < tmpl.len) {
-            var part: INodeTmplPart = undefined;
+            var part: Part = undefined;
             if (std.mem.indexOfAnyPos(u8, tmpl, i + 1, "~$")) |j| {
-                part = if (tmpl[i] == tmpl[j]) switch (tmpl[i]) {
-                    '~' => INodeTmplPart{ .tmpl_uid = try NodeTmplUId.init(alloc, tmpl[i + 1 .. j]) },
-                    '$' => INodeTmplPart{ .tmpl_tag = try NodeTmplTag.init(alloc, tmpl[i + 1 .. j], ctx) },
-                    else => unreachable,
-                } else INodeTmplPart{ .tmpl_raw = try NodeTmplRaw.init(alloc, tmpl[i + 1 .. j]) };
-                i = j;
+                if (tmpl[i] == tmpl[j]) {
+                    part = switch (tmpl[i]) {
+                        '~' => .{ .uid = tmpl[i + 1 .. j] },
+                        '$' => .{ .tag = tmpl[i + 1 .. j] },
+                        else => unreachable,
+                    };
+                    i = j + 1;
+                } else {
+                    part = .{ .raw = tmpl[i..j] };
+                    i = j;
+                }
             } else {
-                part = INodeTmplPart{ .tmpl_raw = try NodeTmplRaw.init(alloc, tmpl[i..]) };
+                part = .{ .raw = tmpl[i..] };
                 i = tmpl.len;
             }
 
             try parts.append(alloc, part);
         }
 
-        const next_inline = NodeInline.init(alloc, r, ctx) catch null;
-
-        node.* = .{ .parts = try parts.toOwnedSlice(alloc), .next_inline = next_inline };
-        return node;
+        return parts.toOwnedSlice(alloc);
     }
 
     fn execute(self: NodeInline, alloc: std.mem.Allocator, ctx: *ExecContext) ![]const u8 {
         var source: std.ArrayListUnmanaged(u8) = .empty;
         for (self.parts) |part| {
             const line = switch (part) {
-                .tmpl_raw => |tmpl_raw| tmpl_raw.raw,
-                .tmpl_uid => |tmpl_uid| try ctx.getUid(alloc, tmpl_uid.name),
-                .tmpl_tag => |tmpl_tag| try ctx.getRegister(alloc, tmpl_tag.name),
+                .raw => |raw| raw,
+                .uid => |uid| try ctx.getUid(alloc, uid),
+                .tag => |tag| try ctx.getRegister(alloc, tag),
             };
             try source.appendSlice(alloc, line);
         }
@@ -553,53 +574,23 @@ const NodeInline = struct {
     }
 };
 
-const NodeTmplRaw = struct {
-    raw: []const u8,
+test "inline template parts" {
+    const tmpl = "~label1~: ~label2~: $a$,$b$ $amogus$~label3~: abracadabra";
+    const parts = try NodeInline.extractParts(std.testing.allocator, tmpl);
+    defer std.testing.allocator.free(parts);
 
-    fn init(alloc: std.mem.Allocator, raw: []const u8) !*const NodeTmplRaw {
-        const node = try alloc.create(@This());
-
-        node.* = .{ .raw = raw };
-        return node;
-    }
-};
-
-const NodeTmplUId = struct {
-    name: []const u8,
-
-    fn init(alloc: std.mem.Allocator, raw: []const u8) !*const NodeTmplUId {
-        const node = try alloc.create(@This());
-
-        node.* = .{ .name = raw };
-        return node;
-    }
-};
-
-const NodeTmplTag = struct {
-    name: []const u8,
-
-    fn init(alloc: std.mem.Allocator, raw: []const u8, ctx: *const ASTContext) !*const NodeTmplTag {
-        const node = try alloc.create(@This());
-        if (!ctx.tags.contains(raw)) return ParseError.UnknownTag;
-
-        node.* = .{ .name = raw };
-        return node;
-    }
-};
-
-const INodeTmplPart = union(enum) {
-    tmpl_raw: *const NodeTmplRaw,
-    tmpl_uid: *const NodeTmplUId,
-    tmpl_tag: *const NodeTmplTag,
-
-    fn init(node: anytype) INodeTmplPart {
-        return switch (@TypeOf(node)) {
-            *const NodeTmplRaw => .{ .tmpl_raw = node },
-            *const NodeTmplUId => .{ .tmpl_uid = node },
-            *const NodeTmplTag => .{ .tmpl_tag = node },
-            else => @compileError("Unsupported struct type: " ++ @typeName(@TypeOf(node))),
-        };
-    }
-};
-
-test "inline template parts" {}
+    const expected = &[_]NodeInline.Part{
+        .{ .uid = "label1" },
+        .{ .raw = ": " },
+        .{ .uid = "label2" },
+        .{ .raw = ": " },
+        .{ .tag = "a" },
+        .{ .raw = "," },
+        .{ .tag = "b" },
+        .{ .raw = " " },
+        .{ .tag = "amogus" },
+        .{ .uid = "label3" },
+        .{ .raw = ": abracadabra" },
+    };
+    try std.testing.expectEqualDeep(expected, parts);
+}
