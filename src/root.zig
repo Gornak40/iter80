@@ -126,6 +126,7 @@ pub const ParseError = std.mem.Allocator.Error || error{
     EmptyMeta,
     ExpectedExpr,
     ExpectedSuncDeclOrStmt,
+    NotEnoughRegisters,
     UnexpectedType,
     UnknownArg,
     UnknownSunc,
@@ -192,13 +193,14 @@ const ExecContext = struct {
 const TagManager = struct {
     used: std.EnumSet(Register) = .initEmpty(),
 
-    const Register = enum { a1, a2, a3, a4, a5, a6, a7, s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11 };
+    const Register = enum { a1, a2, a3, a4, a5, a6, a7, s11, s10, s9, s8, s7, s6, s5, s4, s3, s2, s1, s0 };
 
     fn lock(self: *TagManager) ?Register {
         var r: ?Register = null;
         inline for (std.meta.fields(Register)) |field| {
-            if (!self.used.contains(field.value))
-                r = field.value;
+            const value: Register = @enumFromInt(field.value);
+            if (!self.used.contains(value))
+                r = value;
         }
         return r;
     }
@@ -451,9 +453,14 @@ const NodeStmt = struct {
         var source: std.ArrayListUnmanaged(u8) = .empty;
         const part = switch (self.expr) {
             .literal => |literal| try literal.execute(alloc),
-            else => "TODO: implement",
+            else => "TODO: implement\n",
         };
         try source.appendSlice(alloc, part);
+        if (self.tag) |tag| {
+            const register = ctx.tags.get(tag.name) orelse ctx.tag_manager.lock() orelse return ParseError.NotEnoughRegisters;
+            try ctx.tags.put(alloc, tag.name, register);
+            try std.fmt.format(source.writer(alloc), "mv {s}, a0\n", .{@tagName(register)});
+        }
         if (self.@"inline") |@"inline"| {
             const code = try @"inline".execute(alloc, ctx);
             try source.appendSlice(alloc, code);
