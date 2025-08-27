@@ -170,19 +170,13 @@ const glob_sunc_name = "glob";
 
 const ExecContext = struct {
     sunc_name: []const u8 = glob_sunc_name,
+    tags: std.StringArrayHashMapUnmanaged(TagManager.Register) = .empty,
+
     tag_manager: TagManager = .{},
     suncs: std.StringArrayHashMapUnmanaged(*const NodeSuncDecl) = .empty,
-    tags: std.StringArrayHashMapUnmanaged(TagManager.Register) = .empty,
 
     fn getUid(self: ExecContext, alloc: std.mem.Allocator, uid: []const u8) ![]const u8 {
         return std.fmt.allocPrint(alloc, ".L{s}__{s}", .{ self.sunc_name, uid });
-    }
-
-    fn getRegister(self: ExecContext, alloc: std.mem.Allocator, tag: []const u8) ![]const u8 {
-        const full_tag = try std.fmt.allocPrint(alloc, ".T{s}__{s}", .{ self.sunc_name, tag });
-        defer alloc.free(full_tag);
-        const register = self.tags.getKey(full_tag) orelse unreachable;
-        return register;
     }
 
     fn addSunc(self: *ExecContext, alloc: std.mem.Allocator, node: *const NodeSuncDecl) !void {
@@ -193,16 +187,17 @@ const ExecContext = struct {
 const TagManager = struct {
     used: std.EnumSet(Register) = .initEmpty(),
 
-    const Register = enum { a1, a2, a3, a4, a5, a6, a7, s11, s10, s9, s8, s7, s6, s5, s4, s3, s2, s1, s0 };
+    const Register = enum { s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11, a7, a6, a5, a4, a3, a2, a1 };
+    const registers = std.enums.values(Register);
 
     fn lock(self: *TagManager) ?Register {
-        var r: ?Register = null;
-        inline for (std.meta.fields(Register)) |field| {
-            const value: Register = @enumFromInt(field.value);
-            if (!self.used.contains(value))
-                r = value;
+        for (registers) |r| {
+            if (!self.used.contains(r)) {
+                self.used.toggle(r);
+                return r;
+            }
         }
-        return r;
+        return null;
     }
 
     fn unlock(self: *TagManager, r: Register) void {
@@ -395,6 +390,11 @@ const NodeTagPlace = struct {
         node.* = .{ .name = name };
         return node;
     }
+
+    fn execute(self: NodeTagPlace, alloc: std.mem.Allocator, ctx: *ExecContext) ![]const u8 {
+        const register = ctx.tags.get(self.name) orelse unreachable;
+        return std.fmt.allocPrint(alloc, "mv a0, {s}\n", .{@tagName(register)});
+    }
 };
 
 const NodeSuncPlace = struct {
@@ -453,6 +453,7 @@ const NodeStmt = struct {
         var source: std.ArrayListUnmanaged(u8) = .empty;
         const part = switch (self.expr) {
             .literal => |literal| try literal.execute(alloc),
+            .tag_place => |tag_place| try tag_place.execute(alloc, ctx),
             else => "TODO: implement\n",
         };
         try source.appendSlice(alloc, part);
@@ -568,7 +569,7 @@ const NodeInline = struct {
             const line = switch (part) {
                 .raw => |raw| raw,
                 .uid => |uid| try ctx.getUid(alloc, uid),
-                .tag => |tag| try ctx.getRegister(alloc, tag),
+                .tag => |tag| @tagName(ctx.tags.get(tag) orelse unreachable),
             };
             try source.appendSlice(alloc, line);
         }
