@@ -300,6 +300,7 @@ const NodeRoot = struct {
                 },
             }
         }
+        try std.fmt.format(source.writer(alloc), "ret\n", .{});
         return source.toOwnedSlice(alloc);
     }
 };
