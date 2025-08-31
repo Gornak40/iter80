@@ -169,19 +169,20 @@ const TokenReader = struct {
 const glob_sunc_name = "glob";
 
 const ExecContext = struct {
-    sunc_name: []const u8 = glob_sunc_name,
-    tags: std.StringArrayHashMapUnmanaged(TagManager.Register) = .empty,
+    scope: Scope = .{},
 
     tag_manager: TagManager = .{},
     suncs: std.StringArrayHashMapUnmanaged(*const NodeSuncDecl) = .empty,
 
-    fn getUid(self: ExecContext, alloc: std.mem.Allocator, uid: []const u8) ![]const u8 {
-        return std.fmt.allocPrint(alloc, ".L{s}__{s}", .{ self.sunc_name, uid });
-    }
+    const Scope = struct {
+        name: []const u8 = glob_sunc_name,
+        tags: std.StringArrayHashMapUnmanaged(TagManager.Register) = .empty,
+        args: std.StringArrayHashMapUnmanaged([]const u8) = .empty,
 
-    fn addSunc(self: *ExecContext, alloc: std.mem.Allocator, node: *const NodeSuncDecl) !void {
-        try self.suncs.putNoClobber(alloc, node.name, node);
-    }
+        fn getUid(self: Scope, alloc: std.mem.Allocator, uid: []const u8) ![]const u8 {
+            return std.fmt.allocPrint(alloc, ".L{s}__{s}", .{ self.name, uid });
+        }
+    };
 };
 
 const TagManager = struct {
@@ -287,10 +288,12 @@ const NodeRoot = struct {
 
     fn execute(self: NodeRoot, alloc: std.mem.Allocator, ctx: *ExecContext) ![]const u8 {
         var source: std.ArrayListUnmanaged(u8) = .empty;
-        try std.fmt.format(source.writer(alloc), "global {s}\n{s}:\n", .{ self.label, self.label });
+        try std.fmt.format(source.writer(alloc), ".global {s}\n{s}:\n", .{ self.label, self.label });
         for (self.tops) |top| {
             switch (top) {
-                .sunc_decl => |sunc_decl| try ctx.addSunc(alloc, sunc_decl),
+                .sunc_decl => |sunc_decl| {
+                    try ctx.suncs.putNoClobber(alloc, sunc_decl.name, sunc_decl);
+                },
                 .stmt => |stmt| {
                     const part = try stmt.execute(alloc, ctx);
                     try source.appendSlice(alloc, part);
@@ -376,6 +379,11 @@ const NodeArgPlace = struct {
         node.* = .{ .name = name };
         return node;
     }
+
+    fn execute(self: NodeArgPlace, alloc: std.mem.Allocator, ctx: *const ExecContext) ![]const u8 {
+        _ = alloc;
+        return ctx.scope.args.get(self.name) orelse unreachable;
+    }
 };
 
 const NodeTagPlace = struct {
@@ -391,8 +399,8 @@ const NodeTagPlace = struct {
         return node;
     }
 
-    fn execute(self: NodeTagPlace, alloc: std.mem.Allocator, ctx: *ExecContext) ![]const u8 {
-        const register = ctx.tags.get(self.name) orelse unreachable;
+    fn execute(self: NodeTagPlace, alloc: std.mem.Allocator, ctx: *const ExecContext) ![]const u8 {
+        const register = ctx.scope.tags.get(self.name) orelse unreachable;
         return std.fmt.allocPrint(alloc, "mv a0, {s}\n", .{@tagName(register)});
     }
 };
@@ -415,6 +423,25 @@ const NodeSuncPlace = struct {
 
         node.* = .{ .name = name, .args = try args.toOwnedSlice(alloc) };
         return node;
+    }
+
+    fn execute(self: NodeSuncPlace, alloc: std.mem.Allocator, ctx: *ExecContext) ParseError![]const u8 {
+        const sunc = ctx.suncs.get(self.name) orelse unreachable;
+        var scope: ExecContext.Scope = .{ .name = sunc.name };
+        for (sunc.args, self.args) |key, value| {
+            const source = try value.execute(alloc, ctx);
+            try scope.args.put(alloc, key.name, source);
+        }
+
+        std.mem.swap(ExecContext.Scope, &scope, &ctx.scope);
+        defer std.mem.swap(ExecContext.Scope, &scope, &ctx.scope);
+
+        var source: std.ArrayListUnmanaged(u8) = .empty;
+        for (sunc.body) |stmt| {
+            const part = try stmt.execute(alloc, ctx);
+            try source.appendSlice(alloc, part);
+        }
+        return source.toOwnedSlice(alloc);
     }
 };
 
@@ -452,14 +479,12 @@ const NodeStmt = struct {
     fn execute(self: NodeStmt, alloc: std.mem.Allocator, ctx: *ExecContext) ![]const u8 {
         var source: std.ArrayListUnmanaged(u8) = .empty;
         const part = switch (self.expr) {
-            .literal => |literal| try literal.execute(alloc),
-            .tag_place => |tag_place| try tag_place.execute(alloc, ctx),
-            else => "TODO: implement\n",
+            inline else => |expr| try expr.execute(alloc, ctx),
         };
         try source.appendSlice(alloc, part);
         if (self.tag) |tag| {
-            const register = ctx.tags.get(tag.name) orelse ctx.tag_manager.lock() orelse return ParseError.NotEnoughRegisters;
-            try ctx.tags.put(alloc, tag.name, register);
+            const register = ctx.scope.tags.get(tag.name) orelse ctx.tag_manager.lock() orelse return ParseError.NotEnoughRegisters;
+            try ctx.scope.tags.put(alloc, tag.name, register);
             try std.fmt.format(source.writer(alloc), "mv {s}, a0\n", .{@tagName(register)});
         }
         if (self.@"inline") |@"inline"| {
@@ -482,7 +507,8 @@ const NodeLiteral = struct {
         return node;
     }
 
-    fn execute(self: NodeLiteral, alloc: std.mem.Allocator) ![]const u8 {
+    fn execute(self: NodeLiteral, alloc: std.mem.Allocator, ctx: *const ExecContext) ![]const u8 {
+        _ = ctx;
         return std.fmt.allocPrint(alloc, "li a0, {}\n", .{self.value});
     }
 };
@@ -526,7 +552,7 @@ const NodeInline = struct {
         for (parts) |part| {
             switch (part) {
                 .tag => |tag| if (!ctx.tags.contains(tag)) return ParseError.UnknownTag,
-                else => {},
+                else => continue,
             }
         }
         const next_inline = NodeInline.init(alloc, r, ctx) catch null;
@@ -568,8 +594,8 @@ const NodeInline = struct {
         for (self.parts) |part| {
             const line = switch (part) {
                 .raw => |raw| raw,
-                .uid => |uid| try ctx.getUid(alloc, uid),
-                .tag => |tag| @tagName(ctx.tags.get(tag) orelse unreachable),
+                .uid => |uid| try ctx.scope.getUid(alloc, uid),
+                .tag => |tag| @tagName(ctx.scope.tags.get(tag) orelse unreachable),
             };
             try source.appendSlice(alloc, line);
         }
