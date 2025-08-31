@@ -4,9 +4,11 @@ const iter = @import("iter");
 
 pub fn main() !void {
     var gpa: std.heap.GeneralPurposeAllocator(.{}) = .{};
+    defer _ = gpa.deinit();
     const alloc = gpa.allocator();
 
     const args = try std.process.argsAlloc(alloc);
+    defer std.process.argsFree(alloc, args);
     if (args.len != 2) {
         return error.UsageError; // TODO: more verbose
     }
@@ -14,10 +16,12 @@ pub fn main() !void {
     var file = try std.fs.cwd().openFile(args[1], .{});
     defer file.close();
 
-    const source = try file.readToEndAlloc(alloc, std.math.maxInt(u32));
+    const prog = try file.readToEndAlloc(alloc, std.math.maxInt(u32));
+    defer alloc.free(prog);
+
+    const source = try iter.compile(alloc, prog);
     defer alloc.free(source);
 
-    const tokens = try iter.tokenizeFromSlice(alloc, source);
-    defer alloc.free(tokens);
-    std.debug.print("{any}\n", .{tokens});
+    const ouf = std.io.getStdOut();
+    try std.fmt.format(ouf.writer(), "{s}", .{source});
 }
