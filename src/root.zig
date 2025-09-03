@@ -83,7 +83,7 @@ test "raw tokenizer" {
 
 /// Lifetime of `s` must be not less than lifetime of function result.
 fn tokenizeFromSlice(alloc: std.mem.Allocator, s: []const u8) ![]Token {
-    var list: std.ArrayList(Token) = .empty;
+    var list: std.ArrayListUnmanaged(Token) = .empty;
     var iter = RawTokenizer.init(s);
     while (iter.next()) |raw| {
         try list.append(alloc, Token.init(raw));
@@ -172,12 +172,12 @@ const ExecContext = struct {
     scope: Scope = .{},
 
     tag_manager: TagManager = .{},
-    suncs: std.StringArrayHashMap(*const NodeSuncDecl) = .empty,
+    suncs: std.StringArrayHashMapUnmanaged(*const NodeSuncDecl) = .empty,
 
     const Scope = struct {
         name: []const u8 = glob_sunc_name,
-        tags: std.StringArrayHashMap(TagManager.Register) = .empty,
-        args: std.StringArrayHashMap([]const u8) = .empty,
+        tags: std.StringArrayHashMapUnmanaged(TagManager.Register) = .empty,
+        args: std.StringArrayHashMapUnmanaged([]const u8) = .empty,
 
         fn getUid(self: Scope, alloc: std.mem.Allocator, uid: []const u8) ![]const u8 {
             return std.fmt.allocPrint(alloc, ".L{s}__{s}", .{ self.name, uid });
@@ -265,9 +265,9 @@ fn buildASTLeaky(alloc: std.mem.Allocator, tokens: []const Token) !*const NodeRo
 }
 
 const ASTContext = struct {
-    suncs: std.StringArrayHashMap(*const NodeSuncDecl) = .empty,
-    tags: std.StringArrayHashMap(void) = .empty,
-    args: std.StringArrayHashMap(void) = .empty,
+    suncs: std.StringArrayHashMapUnmanaged(*const NodeSuncDecl) = .empty,
+    tags: std.StringArrayHashMapUnmanaged(void) = .empty,
+    args: std.StringArrayHashMapUnmanaged(void) = .empty,
 };
 
 const NodeRoot = struct {
@@ -276,7 +276,7 @@ const NodeRoot = struct {
 
     fn init(alloc: std.mem.Allocator, r: *TokenReader, ctx: *ASTContext) !*const NodeRoot {
         const node = try alloc.create(@This());
-        var tops: std.ArrayList(INodeTop) = .empty;
+        var tops: std.ArrayListUnmanaged(INodeTop) = .empty;
         while (!r.isEmpty()) {
             const top = try INodeTop.init(alloc, r, ctx);
             try tops.append(alloc, top);
@@ -287,7 +287,7 @@ const NodeRoot = struct {
     }
 
     fn execute(self: NodeRoot, alloc: std.mem.Allocator, ctx: *ExecContext) ![]const u8 {
-        var source: std.ArrayList(u8) = .empty;
+        var source: std.ArrayListUnmanaged(u8) = .empty;
         try std.fmt.format(source.writer(alloc), ".global {s}\n{s}:\n", .{ self.label, self.label });
         for (self.tops) |top| {
             switch (top) {
@@ -331,7 +331,7 @@ const NodeSuncDecl = struct {
         if (ctx.suncs.contains(name)) return ParseError.DuplicateSunc;
         if (std.mem.eql(u8, name, glob_sunc_name)) return ParseError.DuplicateGlobalSunc;
 
-        var args: std.ArrayList(*const NodeArgDecl) = .empty;
+        var args: std.ArrayListUnmanaged(*const NodeArgDecl) = .empty;
         ctx.args.clearRetainingCapacity();
         while (try r.peekType() != .@"::") {
             const arg = try NodeArgDecl.init(alloc, r, ctx);
@@ -339,7 +339,7 @@ const NodeSuncDecl = struct {
         }
         _ = try r.readExpected(.@"::");
 
-        var body: std.ArrayList(*const NodeStmt) = .empty;
+        var body: std.ArrayListUnmanaged(*const NodeStmt) = .empty;
         ctx.tags.clearRetainingCapacity();
         while (try r.peekType() != .@"..") {
             const stmt = try NodeStmt.init(alloc, r, ctx);
@@ -416,7 +416,7 @@ const NodeSuncPlace = struct {
         errdefer r.rollback();
         const sunc = ctx.suncs.get(name) orelse return ParseError.UnknownSunc;
 
-        var args: std.ArrayList(*const NodeStmt) = try .initCapacity(alloc, sunc.args.len);
+        var args: std.ArrayListUnmanaged(*const NodeStmt) = try .initCapacity(alloc, sunc.args.len);
         for (sunc.args) |_| {
             const stmt = try NodeStmt.init(alloc, r, ctx);
             args.appendAssumeCapacity(stmt);
@@ -437,7 +437,7 @@ const NodeSuncPlace = struct {
         std.mem.swap(ExecContext.Scope, &scope, &ctx.scope);
         defer std.mem.swap(ExecContext.Scope, &scope, &ctx.scope);
 
-        var source: std.ArrayList(u8) = .empty;
+        var source: std.ArrayListUnmanaged(u8) = .empty;
         for (sunc.body) |stmt| {
             const part = try stmt.execute(alloc, ctx);
             try source.appendSlice(alloc, part);
@@ -478,7 +478,7 @@ const NodeStmt = struct {
     }
 
     fn execute(self: NodeStmt, alloc: std.mem.Allocator, ctx: *ExecContext) ![]const u8 {
-        var source: std.ArrayList(u8) = .empty;
+        var source: std.ArrayListUnmanaged(u8) = .empty;
         const part = switch (self.expr) {
             inline else => |expr| try expr.execute(alloc, ctx),
         };
@@ -563,7 +563,7 @@ const NodeInline = struct {
     }
 
     fn extractParts(alloc: std.mem.Allocator, tmpl: []const u8) ![]Part {
-        var parts: std.ArrayList(Part) = .empty;
+        var parts: std.ArrayListUnmanaged(Part) = .empty;
         var i: usize = 0;
         while (i < tmpl.len) {
             var part: Part = undefined;
@@ -591,7 +591,7 @@ const NodeInline = struct {
     }
 
     fn execute(self: NodeInline, alloc: std.mem.Allocator, ctx: *ExecContext) ![]const u8 {
-        var source: std.ArrayList(u8) = .empty;
+        var source: std.ArrayListUnmanaged(u8) = .empty;
         for (self.parts) |part| {
             const line = switch (part) {
                 .raw => |raw| raw,
