@@ -169,6 +169,8 @@ const TokenReader = struct {
 const glob_sunc_name = "glob";
 
 const ExecContext = struct {
+    options: CompileOptions,
+
     scope: Scope = .{},
 
     tag_manager: TagManager = .{},
@@ -206,7 +208,11 @@ const TagManager = struct {
     }
 };
 
-pub fn compile(alloc: std.mem.Allocator, s: []const u8) ![]const u8 {
+pub const CompileOptions = struct {
+    label: []const u8 = "main",
+};
+
+pub fn compile(alloc: std.mem.Allocator, s: []const u8, options: CompileOptions) ![]const u8 {
     var arena = std.heap.ArenaAllocator.init(alloc);
     defer arena.deinit();
 
@@ -214,7 +220,7 @@ pub fn compile(alloc: std.mem.Allocator, s: []const u8) ![]const u8 {
 
     const root = try buildASTLeaky(arena.allocator(), tokens);
 
-    var ctx: ExecContext = .{};
+    var ctx: ExecContext = .{ .options = options };
     const source = try root.execute(arena.allocator(), &ctx);
 
     return alloc.dupe(u8, source); // source will be destroyed with arena
@@ -233,7 +239,7 @@ test "compile inline suffix" {
         \\ ..
     ;
 
-    const s = try compile(std.testing.allocator, prog);
+    const s = try compile(std.testing.allocator, prog, .{});
     defer std.testing.allocator.free(s);
 }
 
@@ -254,7 +260,7 @@ test "compile base" {
         \\ 0
     ;
 
-    const s = try compile(std.testing.allocator, prog);
+    const s = try compile(std.testing.allocator, prog, .{});
     defer std.testing.allocator.free(s);
 }
 
@@ -272,7 +278,6 @@ const ASTContext = struct {
 
 const NodeRoot = struct {
     tops: []INodeTop,
-    label: []const u8 = "main", // TODO: pass via args
 
     fn init(alloc: std.mem.Allocator, r: *TokenReader, ctx: *ASTContext) !*const NodeRoot {
         const node = try alloc.create(@This());
@@ -288,7 +293,7 @@ const NodeRoot = struct {
 
     fn execute(self: NodeRoot, alloc: std.mem.Allocator, ctx: *ExecContext) ![]const u8 {
         var source: std.ArrayListUnmanaged(u8) = .empty;
-        try std.fmt.format(source.writer(alloc), ".global {s}\n{s}:\n", .{ self.label, self.label });
+        try std.fmt.format(source.writer(alloc), ".global {s}\n{s}:\n", .{ ctx.options.label, ctx.options.label });
         for (self.tops) |top| {
             switch (top) {
                 .sunc_decl => |sunc_decl| {
@@ -300,6 +305,7 @@ const NodeRoot = struct {
                 },
             }
         }
+        try std.fmt.format(source.writer(alloc), "ret\n", .{});
         return source.toOwnedSlice(alloc);
     }
 };
@@ -435,6 +441,7 @@ const NodeSuncPlace = struct {
 
         std.mem.swap(ExecContext.Scope, &scope, &ctx.scope);
         defer std.mem.swap(ExecContext.Scope, &scope, &ctx.scope);
+        defer for (ctx.scope.tags.values()) |r| ctx.tag_manager.unlock(r);
 
         var source: std.ArrayListUnmanaged(u8) = .empty;
         for (sunc.body) |stmt| {
@@ -627,4 +634,24 @@ test "inline template parts" {
         .{ .raw = ": abracadabra" },
     };
     try std.testing.expectEqualDeep(expected, parts);
+}
+
+/// This is a temporary solution. Soon `iter80` will have its own preprocessor.
+pub fn preprocess(alloc: std.mem.Allocator, sub_path: []const u8) ![]const u8 {
+    var proc: std.process.Child = .init(&.{ "cc", "-xc", "-E", "-P", sub_path }, alloc);
+    proc.stdin_behavior = .Ignore;
+    proc.stdout_behavior = .Pipe;
+
+    try proc.spawn();
+
+    var buffer: [1024]u8 = undefined;
+    var stdout_reader = proc.stdout.?.reader(&buffer);
+    const reader = &stdout_reader.interface;
+    const prog = try reader.allocRemaining(alloc, .unlimited);
+
+    switch (try proc.wait()) {
+        .Exited => |code| if (code != 0) std.process.exit(code),
+        else => std.process.abort(),
+    }
+    return prog;
 }

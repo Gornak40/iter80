@@ -26,12 +26,12 @@ __none ::
 
 __iter a b ::
     none    `~a~:`
-    a   `bz a0, ~e~`
+    a   `beqz a0, ~e~`
     b   `j ~a~` `~e~:`
 ..
 
 __? a b c ::
-    a   `bz a0, ~c~`
+    a   `beqz a0, ~c~`
     b   `j ~e~` `~c~:`
     c   `~e~:`
 ..
@@ -73,6 +73,10 @@ __-- a ::
     a   `addi a0, a0, -1`
 ..
 
+__*8 a ::
+    a   `slli a0, a0, 3`
+..
+
 __< a b ::
 a=   a
     b   `slt a0, $a$, a0`
@@ -83,6 +87,10 @@ a=   a
     b   `slt a0, a0, $a$`
 ..
 
-__[] a ::
-a=  a   `ld a0, 0(=a)`
+__() A ::
+    A   `ld a0, 0(a0)`
+..
+
+__[] A i ::
+    () + A *8 i
 ..

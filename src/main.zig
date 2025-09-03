@@ -7,21 +7,23 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const alloc = gpa.allocator();
 
+    var stdout_buffer: [1024]u8 = undefined;
+    var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
+    const stdout = &stdout_writer.interface;
+
     const args = try std.process.argsAlloc(alloc);
     defer std.process.argsFree(alloc, args);
     if (args.len != 2) {
         return error.UsageError; // TODO: more verbose
     }
+    const sub_path = args[1];
 
-    var file = try std.fs.cwd().openFile(args[1], .{});
-    defer file.close();
-
-    const prog = try file.readToEndAlloc(alloc, std.math.maxInt(u32));
+    const prog = try iter.preprocess(alloc, sub_path);
     defer alloc.free(prog);
 
-    const source = try iter.compile(alloc, prog);
+    const source = try iter.compile(alloc, prog, .{});
     defer alloc.free(source);
 
-    const ouf = std.io.getStdOut();
-    try std.fmt.format(ouf.writer(), "{s}", .{source});
+    try stdout.print("{s}", .{source});
+    try stdout.flush();
 }
