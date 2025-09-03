@@ -26,12 +26,12 @@ __none ::
 
 __iter a b ::
     none    `~a~:`
-    a   `bz a0, ~e~`
+    a   `beqz a0, ~e~`
     b   `j ~a~` `~e~:`
 ..
 
 __? a b c ::
-    a   `bz a0, ~c~`
+    a   `beqz a0, ~c~`
     b   `j ~e~` `~c~:`
     c   `~e~:`
 ..

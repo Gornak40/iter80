@@ -1,6 +1,19 @@
-__+ a b ::
-a=  a
-    b `add a0, $a$, a0`
+#include "core.iter"
+
+__n ::
+    5
 ..
 
-+ 13 14
+__op a b ::
+    + a b
+..
+
+i=  null
+sum=    null
+iter
+    < =i n
+    sum=    ,
+        op =sum =i
+        i= ++ =i
+
+=sum

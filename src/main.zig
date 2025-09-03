@@ -16,12 +16,9 @@ pub fn main() !void {
     if (args.len != 2) {
         return error.UsageError; // TODO: more verbose
     }
-    const filename = args[1];
+    const sub_path = args[1];
 
-    var file = try std.fs.cwd().openFile(filename, .{});
-    defer file.close();
-
-    const prog = try file.readToEndAlloc(alloc, std.math.maxInt(u32));
+    const prog = try iter.preprocess(alloc, sub_path);
     defer alloc.free(prog);
 
     const source = try iter.compile(alloc, prog, .{});

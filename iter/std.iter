@@ -1,4 +1,4 @@
-#include "base.iter"
+#include "core.iter"
 
 __accumulate A n ::
 A=  A

@@ -635,3 +635,23 @@ test "inline template parts" {
     };
     try std.testing.expectEqualDeep(expected, parts);
 }
+
+/// This is a temporary solution. Soon `iter80` will have its own preprocessor.
+pub fn preprocess(alloc: std.mem.Allocator, sub_path: []const u8) ![]const u8 {
+    var proc: std.process.Child = .init(&.{ "cc", "-xc", "-E", "-P", sub_path }, alloc);
+    proc.stdin_behavior = .Ignore;
+    proc.stdout_behavior = .Pipe;
+
+    try proc.spawn();
+
+    var buffer: [1024]u8 = undefined;
+    var stdout_reader = proc.stdout.?.reader(&buffer);
+    const reader = &stdout_reader.interface;
+    const prog = try reader.allocRemaining(alloc, .unlimited);
+
+    switch (try proc.wait()) {
+        .Exited => |code| if (code != 0) std.process.exit(code),
+        else => std.process.abort(),
+    }
+    return prog;
+}
