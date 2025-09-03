@@ -8,6 +8,6 @@ sum= null
     iter < =i =n
         sum=  ,
             + =sum [] =A =i
-            i= ++ i
+            i= ++ =i
     =sum
 ..
