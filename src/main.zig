@@ -24,9 +24,7 @@ pub fn main() !void {
     const prog = try file.readToEndAlloc(alloc, std.math.maxInt(u32));
     defer alloc.free(prog);
 
-    const source = try iter.compile(alloc, prog, .{
-        .include = &.{std.fs.path.dirname(filename) orelse "."},
-    });
+    const source = try iter.compile(alloc, prog, .{});
     defer alloc.free(source);
 
     try stdout.print("{s}", .{source});

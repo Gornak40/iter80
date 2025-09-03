@@ -7,8 +7,6 @@ const Token = struct {
     fn init(s: []const u8) Token {
         return if (std.mem.startsWith(u8, s, "__"))
             .{ .type = .__a, .meta = s[2..] }
-        else if (std.mem.startsWith(u8, s, "##"))
-            .{ .type = .@"##a", .meta = s[2..] }
         else if (std.mem.eql(u8, s, "::"))
             .{ .type = .@"::" }
         else if (std.mem.eql(u8, s, ".."))
@@ -25,7 +23,6 @@ const Token = struct {
 
     const Type = enum {
         __a,
-        @"##a",
         @"::",
         @"..",
         @"a=",
@@ -213,7 +210,6 @@ const TagManager = struct {
 
 pub const CompileOptions = struct {
     label: []const u8 = "main",
-    include: []const []const u8 = &.{},
 };
 
 pub fn compile(alloc: std.mem.Allocator, s: []const u8, options: CompileOptions) ![]const u8 {
@@ -222,7 +218,7 @@ pub fn compile(alloc: std.mem.Allocator, s: []const u8, options: CompileOptions)
 
     const tokens = try tokenizeFromSlice(arena.allocator(), s);
 
-    const root = try buildASTLeaky(arena.allocator(), tokens, options);
+    const root = try buildASTLeaky(arena.allocator(), tokens);
 
     var ctx: ExecContext = .{ .options = options };
     const source = try root.execute(arena.allocator(), &ctx);
@@ -268,15 +264,13 @@ test "compile base" {
     defer std.testing.allocator.free(s);
 }
 
-fn buildASTLeaky(alloc: std.mem.Allocator, tokens: []const Token, optinos: CompileOptions) !*const NodeRoot {
+fn buildASTLeaky(alloc: std.mem.Allocator, tokens: []const Token) !*const NodeRoot {
     var r: TokenReader = .{ .tokens = tokens };
-    var ctx: ASTContext = .{ .options = optinos };
+    var ctx: ASTContext = .{};
     return NodeRoot.init(alloc, &r, &ctx);
 }
 
 const ASTContext = struct {
-    options: CompileOptions,
-
     suncs: std.StringArrayHashMapUnmanaged(*const NodeSuncDecl) = .empty,
     tags: std.StringArrayHashMapUnmanaged(void) = .empty,
     args: std.StringArrayHashMapUnmanaged(void) = .empty,
