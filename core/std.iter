@@ -1,3 +1,5 @@
+##base
+
 __accumulate A n ::
 A=  A
 n=  n
