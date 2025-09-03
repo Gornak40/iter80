@@ -7,6 +7,10 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const alloc = gpa.allocator();
 
+    var stdout_buffer: [1024]u8 = undefined;
+    var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
+    const stdout = &stdout_writer.interface;
+
     const args = try std.process.argsAlloc(alloc);
     defer std.process.argsFree(alloc, args);
     if (args.len != 2) {
@@ -22,6 +26,6 @@ pub fn main() !void {
     const source = try iter.compile(alloc, prog);
     defer alloc.free(source);
 
-    const ouf = std.io.getStdOut();
-    try std.fmt.format(ouf.writer(), "{s}", .{source});
+    try stdout.print("{s}", .{source});
+    try stdout.flush();
 }
