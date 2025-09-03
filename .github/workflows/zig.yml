@@ -15,6 +15,6 @@ jobs:
           version: 0.15.1
       - run: zig build --summary all
       - run: zig build test
-      - run: zig build run -- core/base.iter
-      - run: zig build run -- core/std.iter
-      - run: zig build run -- core/test.iter
+      - run: zig build run -- iter/core.iter
+      - run: zig build run -- iter/std.iter
+      - run: zig build run -- iter/test.iter
