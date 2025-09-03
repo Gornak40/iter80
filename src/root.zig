@@ -436,6 +436,7 @@ const NodeSuncPlace = struct {
 
         std.mem.swap(ExecContext.Scope, &scope, &ctx.scope);
         defer std.mem.swap(ExecContext.Scope, &scope, &ctx.scope);
+        defer for (ctx.scope.tags.values()) |r| ctx.tag_manager.unlock(r);
 
         var source: std.ArrayListUnmanaged(u8) = .empty;
         for (sunc.body) |stmt| {
